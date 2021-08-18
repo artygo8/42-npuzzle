@@ -1,8 +1,11 @@
 #!/bin/python3
-import random, sys
+import random
+import sys
 
-
+GREEDY = 0
 INFINITY = 10 ** 10
+DEFAULT_SIZE = 4
+HEURISTIC = 0  # Choose from 0: Pythagore, 1: Manhattan, 2: ???
 
 
 class dir:
@@ -15,17 +18,20 @@ class NPuzzle:
 
     # Low Level Functions
 
-    def __init__(self, size=0, lst=False, local=0) -> None:
+    def __init__(self, size=0, lst=False, local=INFINITY, filename=None) -> None:
         self.size = size
 
-        if size not in self.recorded_final_lsts:
-            self.recorded_final_lsts[size] = self.final_lst()
+        if filename:
+            lst = self.parse(filename)
+
+        if self.size not in self.recorded_final_lsts:
+            self.recorded_final_lsts[self.size] = self.final_lst()
 
         self.lst = lst or self.random_lst()
         self.sign = " ".join(map(str, self.lst))
         self.parent_sign = None
-        self.local = local
-        self.glob = self.heuristic()
+        self.local = local if lst and not filename else 0
+        self.glob = self.greedy() if GREEDY else self.heuristic()
 
     def __eq__(self, other) -> bool:
         return self.sign == other.sign
@@ -51,13 +57,13 @@ class NPuzzle:
     def parse(self, filename) -> list:
 
         self.size = 0
-        self.lst = []
+        lst = []
 
-        with open(filename, 'r') as f:
+        with open(filename, "r") as f:
 
             for line in f.readlines():
 
-                line = line.split('#')[0]
+                line = line.split("#")[0]
                 current_size = 0
 
                 for enum, elem in enumerate(line.strip().split()):
@@ -65,7 +71,7 @@ class NPuzzle:
                         if self.size == 0:
                             self.size = int(elem)
                         else:
-                            self.lst.append(int(elem))
+                            lst.append(int(elem))
                     except Exception:
                         raise Exception("What the fuck, mate ? These ain't numbers !")
                     current_size = enum + 1
@@ -73,10 +79,10 @@ class NPuzzle:
                 if current_size != self.size and current_size != 1:
                     raise Exception("Incoherent sizes")
 
-        if sorted(self.lst) != [*range(self.size ** 2)]:
+        if sorted(lst) != [*range(self.size ** 2)]:
             raise Exception("This file contains bad numbers")
 
-        return self
+        return lst
 
     # Tool Functions
 
@@ -140,7 +146,7 @@ class NPuzzle:
 
         return snake
 
-    def neighbours(self) -> list:
+    def neighbours(self, cost) -> list:
 
         neighbours = list()
         x, y = self.find(0)
@@ -149,7 +155,7 @@ class NPuzzle:
         def add_swapped_neigh(new_pos):
             lst = list(self.lst)
             lst[cur_pos], lst[new_pos] = lst[new_pos], lst[cur_pos]
-            new_neigh = NPuzzle(size=self.size, lst=lst, local=self.local + 1)
+            new_neigh = NPuzzle(size=self.size, lst=lst, local=self.local + cost)
             new_neigh.parent_sign = self.sign
             neighbours.append(new_neigh)
 
@@ -182,7 +188,14 @@ class NPuzzle:
         return total
 
     def heuristic(self) -> float:
-        return self.pythagoreanDistance(self.recorded_final_lsts[self.size]) + self.local
+        return self.greedy() + self.local
+
+    # Function to modify
+
+    def greedy(self):
+        return {0: self.pythagoreanDistance, 1: self.manhattanDistance}[HEURISTIC](
+            self.recorded_final_lsts[self.size]
+        )
 
 
 class puzzle_ordered_queue:
@@ -225,16 +238,21 @@ class puzzle_ordered_queue:
 
 
 class SolveNPuzzle:
-
     def __init__(self) -> None:
-        self.nodes = dict()  # key=NPuzzle.sign, value=NPuzzle
-        self.cost = 0
-        self.max_size = 0
-        self.result = []
-        # self.complexity_in_size = 0
+        self.cost = 1
+
         self.queue = puzzle_ordered_queue()
 
+        self.ordered_sequence_of_states = []
+        self.total_ever_selected = 0
+        self.complexity_in_size = 0
+        self.number_of_moves = 0
+
+        self.npuzzle = None
+
     def solve(self, origin_npuzzle: NPuzzle):
+
+        self.npuzzle = origin_npuzzle
 
         if not origin_npuzzle.solvable():
             return print("This NPuzzle is unsolvable")
@@ -245,24 +263,41 @@ class SolveNPuzzle:
         self.queue.add(origin_npuzzle)
 
         while self.queue.not_visited:
+
             npuzzle = self.queue.get_next()
+            self.total_ever_selected += 1
+
             if npuzzle == final_puzzle:
                 return self.success(npuzzle)
             else:
-                for neigh in npuzzle.neighbours():
+                for neigh in npuzzle.neighbours(self.cost):
                     if (
                         neigh.sign not in self.queue.dct
                         or neigh.glob < self.queue.dct[neigh.sign].glob
                     ):
                         self.queue.add(neigh)
 
-    def success(self, npuzzle):
-        self.result = [npuzzle]
-        tmp = npuzzle
-        while (tmp.parent_sign):
+    def success(self, final_npuzzle):
+
+        self.complexity_in_size = len(self.queue.dct)
+
+        self.ordered_sequence_of_states = [final_npuzzle]
+        tmp = final_npuzzle
+        while tmp.parent_sign:
             tmp = self.queue.dct[tmp.parent_sign]
-            self.result.append(tmp)
-        return self.result
+            self.ordered_sequence_of_states.append(tmp)
+
+        self.number_of_moves = len(self.ordered_sequence_of_states)
+
+        return self.ordered_sequence_of_states
+
+    def results(self):
+        return f"""Solving
+{str(self.npuzzle)}
+total_ever_selected (time) = {self.total_ever_selected}
+complexity_in_size (size) = {self.complexity_in_size}
+number_of_moves = {self.number_of_moves}
+"""
 
 
 def get_solvable_puzzle(size) -> NPuzzle:
@@ -274,17 +309,16 @@ def get_solvable_puzzle(size) -> NPuzzle:
 
 if __name__ == "__main__":
 
-    SIZE = 5
-
     npuzzles_to_solve = list()
 
     if len(sys.argv) >= 2:
         for filename in sys.argv[1:]:
-            npuzzles_to_solve.append(NPuzzle().parse(filename))
+            npuzzles_to_solve.append(NPuzzle(filename=filename))
 
     if not npuzzles_to_solve:
-        npuzzles_to_solve.append(get_solvable_puzzle(SIZE))
+        npuzzles_to_solve.append(get_solvable_puzzle(DEFAULT_SIZE))
 
     for my_np in npuzzles_to_solve:
         solver = SolveNPuzzle()
-        print(solver.solve(my_np))
+        result = solver.solve(my_np)
+        print(solver.results())

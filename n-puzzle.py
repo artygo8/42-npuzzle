@@ -1,34 +1,8 @@
 #!/bin/python3
-import random
-from typing_extensions import final
-
-INFINITY = 10**10
+import random, sys
 
 
-def flatten_ordered_spirale(size):
-
-    ordered_lst = [i for i in range(size**2)]
-    ordered_state = [ordered_lst[i*size:(i+1)*size] for i in range(size)]
-    spirale = []
-
-    table = [[0] * size for _ in range(size)]
-    x, y, last_dir = 0, 0, dir.UP
-
-    def next(last_dir):
-        choices = [(x+1, y), (x, y+1), (x-1, y), (x, y-1)] * 2
-        for e, (x1, y1) in enumerate(choices[last_dir:]):
-            if 0 <= x1 < size and 0 <= y1 < size and not table[y1][x1]:
-                return x1, y1, (last_dir + e) % 4
-        else:
-            return x1, y1, (last_dir + 1) % 4
-
-    for _ in range(size ** 2):
-        table[y][x] = 1
-        spirale.append(ordered_state[y][x])
-        x, y, last_dir = next(last_dir)
-
-    return spirale
-
+INFINITY = 10 ** 10
 
 
 class dir:
@@ -37,56 +11,136 @@ class dir:
 
 class NPuzzle:
 
-    final_lsts = dict() # size: list
+    recorded_final_lsts = dict()  # size: list
 
-    def __init__(self, size=0, lst=False, local=0):
-        self.size = size or int(len(lst) ** .5)
-        if self.size not in self.final_lsts:
-            self.final_lsts[self.size] = self.final_lst()
+    # Low Level Functions
+
+    def __init__(self, size=0, lst=False, local=0) -> None:
+        self.size = size
+
+        if size not in self.recorded_final_lsts:
+            self.recorded_final_lsts[size] = self.final_lst()
+
         self.lst = lst or self.random_lst()
-        self.sign = ' '.join(map(str, self.lst))
+        self.sign = " ".join(map(str, self.lst))
         self.parent_sign = None
-        self.local = INFINITY if lst else 0
+        self.local = local
         self.glob = self.heuristic()
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return self.sign == other.sign
 
-    def __str__(self):
-            return '\n'.join(
-                ' '.join(f'{number:{len(str(self.size**2))+1}d}' for number in self.lst[i * self.size:(i + 1) * self.size])
-                for i in range(self.size)
+    def __str__(self) -> str:
+        return "\n".join(
+            " ".join(
+                f"{number:{len(str(self.size**2))+1}d}"
+                for number in self.lst[i * self.size : (i + 1) * self.size]
             )
+            for i in range(self.size)
+        )
 
-    def copy_goals(self, other):
+    def copy_goals(self, other) -> None:
         self.parent_sign = other.parent_sign
         self.local = other.local
         self.glob = other.glob
 
-    def to_snake_list(self, lst=None):
-        return [(lst or self.lst)[index] for index in flatten_ordered_spirale(self.size)]
-
-    def random_lst(self):
-        mess = [*range(self.size ** 2)]
-        random.shuffle(mess)
-        return mess
-
-    def count_inversions(self, lst):
-        tmp = list(lst)
-        tmp.remove(0)
-        return sum(tmp[i] > tmp[j] for i in range(len(tmp)) for j in range(i+1, len(tmp)))
-
-    def solvable(self):
-        return not bool(self.count_inversions(self.to_snake_list()) % 2)
-
-    def final_lst(self):
-        return [(j + 1, 0)[j + 1 == self.size ** 2] for j in [flatten_ordered_spirale(self.size).index(i) for i in range(self.size**2)]]
-
-    def find(self, n: int):
+    def find(self, n: int) -> (int, int):
         index = self.lst.index(n)
         return (index % self.size, index // self.size)
 
-    def neighbours(self) -> set():
+    def parse(self, filename) -> list:
+
+        self.size = 0
+        self.lst = []
+
+        with open(filename, 'r') as f:
+
+            for line in f.readlines():
+
+                line = line.split('#')[0]
+                current_size = 0
+
+                for enum, elem in enumerate(line.strip().split()):
+                    try:
+                        if self.size == 0:
+                            self.size = int(elem)
+                        else:
+                            self.lst.append(int(elem))
+                    except Exception:
+                        raise Exception("What the fuck, mate ? These ain't numbers !")
+                    current_size = enum + 1
+
+                if current_size != self.size and current_size != 1:
+                    raise Exception("Incoherent sizes")
+
+        if sorted(self.lst) != [*range(self.size ** 2)]:
+            raise Exception("This file contains bad numbers")
+
+        return self
+
+    # Tool Functions
+
+    def random_lst(self) -> list:
+        return random.sample(range(self.size ** 2), self.size ** 2)
+
+    def final_lst(self) -> list:
+        return [
+            (j + 1, 0)[j + 1 == self.size ** 2]
+            for j in [
+                self.to_snake_ordered(self.size).index(i) for i in range(self.size ** 2)
+            ]
+        ]
+
+    def count_inversions(self, lst) -> int:
+        tmp = [i for i in lst if i != 0]
+        return sum(
+            tmp[i] > tmp[j] for i in range(len(tmp)) for j in range(i + 1, len(tmp))
+        )
+
+    def solvable(self) -> bool:
+        return not self.count_inversions(self.to_snake()) % 2
+
+    def to_snake(self) -> list:
+        return [self.lst[index] for index in self.to_snake_ordered(self.size)]
+
+    def to_snake_ordered(self, size) -> list:
+        """gives the spirale order for an ordered grid.
+
+        Example:
+            --> size = 4
+
+                               0  1  2  3
+            --> ordered grid:  4  5  6  7
+                               8  9 10 11
+                              12 13 14 15
+
+            --> snake ordered:
+            [0, 1, 2, 3, 7, 11, 15, 14, 13, 12, 8, 4, 5, 6, 10, 9]
+        """
+
+        ordered_lst = [i for i in range(size ** 2)]
+        ordered_grid = [ordered_lst[i * size : (i + 1) * size] for i in range(size)]
+        snake = []
+
+        table = [[0] * size for _ in range(size)]
+        x, y, last_dir = 0, 0, dir.UP
+
+        def next(last_dir) -> (int, int):
+            choices = [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)] * 2
+            for e, (x1, y1) in enumerate(choices[last_dir:]):
+                if 0 <= x1 < size and 0 <= y1 < size and not table[y1][x1]:
+                    return x1, y1, (last_dir + e) % 4
+            else:
+                return x1, y1, (last_dir + 1) % 4
+
+        for _ in range(size ** 2):
+            table[y][x] = 1
+            snake.append(ordered_grid[y][x])
+            x, y, last_dir = next(last_dir)
+
+        return snake
+
+    def neighbours(self) -> list:
 
         neighbours = list()
         x, y = self.find(0)
@@ -109,29 +163,30 @@ class NPuzzle:
             add_swapped_neigh(x + self.size * (y - 1))
         return neighbours
 
+    # Heuristic Functions
+
     def manhattanDistance(self, lst) -> int:
         total = 0
         for y in range(self.size):
             for x in range(self.size):
                 i, j = self.find(lst[y * self.size + x])
-                total += (abs(j - y) + abs(i - x))
+                total += abs(j - y) + abs(i - x)
         return total
 
-    def pythagoreanDistance(self, lst):
+    def pythagoreanDistance(self, lst) -> float:
         total = 0
         for y in range(self.size):
             for x in range(self.size):
                 i, j = self.find(lst[y * self.size + x])
-                total += (abs(j - y)**2 + abs(i - x)**2)**.5
+                total += (abs(j - y) ** 2 + abs(i - x) ** 2) ** 0.5
         return total
 
-    def heuristic(self):
-        return self.pythagoreanDistance(self.final_lsts[self.size]) + ((self.local or 1) ** .5)
-        
+    def heuristic(self) -> float:
+        return self.pythagoreanDistance(self.recorded_final_lsts[self.size]) + self.local
 
 
 class puzzle_ordered_queue:
-    """Ordered Queue made of different state puzzles, with a dict to easily access each puzzle."""
+    """Ordered Queue made of different grid puzzles, with a dict to easily access each puzzle."""
 
     def __init__(self) -> None:
         self.dct = dict()
@@ -175,42 +230,61 @@ class SolveNPuzzle:
         self.nodes = dict()  # key=NPuzzle.sign, value=NPuzzle
         self.cost = 0
         self.max_size = 0
+        self.result = []
         # self.complexity_in_size = 0
         self.queue = puzzle_ordered_queue()
-
 
     def solve(self, origin_npuzzle: NPuzzle):
 
         if not origin_npuzzle.solvable():
-            return print('This NPuzzle is impossible')
+            return print("This NPuzzle is unsolvable")
 
-        final_puzzle = NPuzzle(origin_npuzzle.size, origin_npuzzle.final_lst(), INFINITY)
+        final_puzzle = NPuzzle(
+            origin_npuzzle.size, origin_npuzzle.final_lst(), INFINITY
+        )
         self.queue.add(origin_npuzzle)
 
         while self.queue.not_visited:
             npuzzle = self.queue.get_next()
             if npuzzle == final_puzzle:
-                return len(self.queue.dct)
+                return self.success(npuzzle)
             else:
                 for neigh in npuzzle.neighbours():
-                    if neigh.sign not in self.queue.dct or neigh.glob < self.queue.dct[neigh.sign].glob:
+                    if (
+                        neigh.sign not in self.queue.dct
+                        or neigh.glob < self.queue.dct[neigh.sign].glob
+                    ):
                         self.queue.add(neigh)
 
+    def success(self, npuzzle):
+        self.result = [npuzzle]
+        tmp = npuzzle
+        while (tmp.parent_sign):
+            tmp = self.queue.dct[tmp.parent_sign]
+            self.result.append(tmp)
+        return self.result
 
-def get_solvable_puzzle(size):
+
+def get_solvable_puzzle(size) -> NPuzzle:
     my_npuzzle = NPuzzle(size)
     if not my_npuzzle.solvable():
         my_npuzzle.lst[-1], my_npuzzle.lst[0] = my_npuzzle.lst[0], my_npuzzle.lst[-1]
     return my_npuzzle
 
 
-if __name__ == '__main__':
-    results = []
-    size = 3
-    for _ in range(100):
-        my_npuzzle = get_solvable_puzzle(size)
+if __name__ == "__main__":
+
+    SIZE = 5
+
+    npuzzles_to_solve = list()
+
+    if len(sys.argv) >= 2:
+        for filename in sys.argv[1:]:
+            npuzzles_to_solve.append(NPuzzle().parse(filename))
+
+    if not npuzzles_to_solve:
+        npuzzles_to_solve.append(get_solvable_puzzle(SIZE))
+
+    for my_np in npuzzles_to_solve:
         solver = SolveNPuzzle()
-        results.append(solver.solve(my_npuzzle))
-        # print(results)
-    print(results)
-    print(f'complexity in size: mean={sum(results) // len(results)} median={sorted(results)[len(results)//2]}')
+        print(solver.solve(my_np))
